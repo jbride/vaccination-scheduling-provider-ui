@@ -1,10 +1,376 @@
 import * as React from 'react';
 import { PageSection, Title } from '@patternfly/react-core';
+import $ from 'jquery';
+import L from 'leaflet';
+import moment from 'moment';
+import oplogo from '@app/bgimages/optaPlannerLogo200px.png';
+import 'bootstrap/dist/css/bootstrap.min.css';
+
+var autoRefreshIntervalId = null;
+var vaccineCenterLeafletGroup = null;
+var personLeafletGroup = null;
+
+const timeslotStyle = {
+  float: 'right'
+};
+
+const cardStyle = (color) => {
+  backgroundColor: color
+}
+
+function refreshSolution() {
+  $.getJSON("localhost:8080/vaccinationSchedule", function (solution) {
+    refreshSolvingButtons(solution.solverStatus != null && solution.solverStatus !== "NOT_SOLVING");
+    $("#score").text("Score: " + (solution.score == null ? "?" : solution.score));
+
+    const vaccineTypesDiv = $("#vaccineTypes");
+    vaccineTypesDiv.children().remove();
+    solution.vaccineTypeList.forEach((vaccineType) => {
+      const color = pickColor(vaccineType);
+      vaccineTypesDiv.append($(`<div className="card" />`)
+          .append($(`<div className="card-body p-2"/>`)
+            .append($(`<h5 className="card-title mb-0"/>`).text(vaccineTypeToString(vaccineType)))));
+    });
+
+    const scheduleTable = $("#scheduleTable");
+    scheduleTable.children().remove();
+    const unassignedPeronsDiv = $("#unassignedPersons");
+    unassignedPeronsDiv.children().remove();
+
+    const thead = $("<thead>").appendTo(scheduleTable);
+    const headerRow = $("<tr>").appendTo(thead);
+    headerRow.append($("<th>Timeslot</th>"));
+    solution.vaccinationCenterList.forEach((vaccinationCenter) => {
+      for (lineIndex = 0; lineIndex < vaccinationCenter.lineCount; lineIndex++) {
+        headerRow
+          .append($("<th/>")
+            .append($("<span/>").text(vaccinationCenter.name + " " + lineIndex)));
+      }
+    });
+
+    const injectionMap = new Map(solution.injectionList
+      .map(injection => [injection.dateTime + "/" + injection.vaccinationCenter.name + "/" + injection.lineIndex, injection]));
+    var personIdToInjectionMap = new Map();
+    solution.injectionList.forEach((injection) => {
+      if (injection.person != null) {
+        personIdToInjectionMap.set(injection.person.id, injection);
+      }
+    });
+
+    const tbody = $(`<tbody>`).appendTo(scheduleTable);
+    var previousParsedDateTime = null;
+    solution.timeslotDateTimeList.forEach((dateTime) => {
+      const row = $(`<tr>`).appendTo(tbody);
+      var parsedDateTime = moment(dateTime, "YYYY,M,D,H,m");
+      var showDate = (previousParsedDateTime == null || !parsedDateTime.isSame(previousParsedDateTime, "day"));
+      row
+        .append($(`<th className="align-middle"/>`)
+          .append($(`<span style={timeslotStyle} />`).text(showDate ? parsedDateTime.format("ddd MMM D HH:mm") : parsedDateTime.format("HH:mm"))));
+      previousParsedDateTime = parsedDateTime;
+      solution.vaccinationCenterList.forEach((vaccinationCenter) => {
+        for (lineIndex = 0; lineIndex < vaccinationCenter.lineCount; lineIndex++) {
+          var injection = injectionMap.get(dateTime + "/" + vaccinationCenter.name + "/" + lineIndex);
+          if (injection == null) {
+            row.append($(`<td className="p-1"/>`));
+          } else {
+            const color = pickColor(injection.vaccineType);
+            var cardBody = $(`<div className="card-body pt-1 pb-1 pl-2 pr-2"/>`);
+            if (injection.person == null) {
+              cardBody.append($(`<h5 className="card-title mb-0"/>`).text("Unassigned"));
+            } else {
+              cardBody.append($(`<h5 className="card-title mb-1"/>`)
+                .text(injection.person.name + " (" + injection.person.age + ")"));
+              if (injection.person.age >= 55 && injection.vaccineType === "ASTRAZENECA") {
+                cardBody.append($(`<p className="badge badge-danger mb-0"/>`).text("55+ has " + vaccineTypeToString(injection.vaccineType)));
+              }
+              if (!injection.person.firstShotInjected) {
+                cardBody.append($(`<p className="card-text ml-2 mb-0"/>`).text("1th shot"));
+              } else {
+                var idealDateDiff = moment(injection.dateTime, "YYYY,M,D,H,m").diff(moment(injection.person.secondShotIdealDate, "YYYY,M,D"), 'days');
+                cardBody.append($(`<p className="card-text ml-2 mb-0"/>`).text("2nd shot ("
+                  + (idealDateDiff === 0 ? "ideal day"
+                    : (idealDateDiff < 0 ? (-idealDateDiff) + " days too early"
+                      : idealDateDiff + " days too late")) + ")"));
+                if (injection.vaccineType !== injection.person.firstShotVaccineType) {
+                  cardBody.append($(`<p className="badge badge-danger ml-2 mb-0"/>`).text("First shot was " + vaccineTypeToString(injection.person.firstShotVaccineType)));
+                }
+              }
+            }
+            row.append($(`<td className="p-1"/>`)
+              .append($(`<div className="card" style={cardStyle(color)}/>`)
+                .append(cardBody)));
+          }
+        }
+      });
+    });
+
+
+    vaccineCenterLeafletGroup.clearLayers();
+    solution.vaccinationCenterList.forEach((vaccinationCenter) => {
+      L.marker(vaccinationCenter.location).addTo(vaccineCenterLeafletGroup);
+    });
+
+    personLeafletGroup.clearLayers();
+    solution.personList.forEach((person) => {
+      const injection = personIdToInjectionMap.get(person.id);
+      const personColor = (injection == null ? "gray" : pickColor(injection.vaccineType));
+      L.circleMarker(person.homeLocation, {radius: 4, color: personColor, weight: 2}).addTo(personLeafletGroup);
+      if (injection != null) {
+        L.polyline([person.homeLocation, injection.vaccinationCenter.location], {color: personColor, weight: 1}).addTo(personLeafletGroup);
+      } else {
+        unassignedPeronsDiv.append($(`<div className="card"/>`)
+            .append($(`<div className="card-body pt-1 pb-1 pl-2 pr-2"/>`)
+              .append($(`<h5 className="card-title mb-1"/>`).text(person.name + " (" + person.age + ")"))
+              .append($(`<p className="card-text ml-2"/>`).text(
+                person.firstShotInjected
+                ? "2nd shot (ideally " + moment(person.secondShotIdealDate, "YYYY,M,D").format("ddd MMM D") + ")"
+                : "1th shot"))));
+      }
+    });
+  });
+}
+
+function vaccineTypeToString(vaccineType) {
+  switch (vaccineType) {
+    case "PFIZER":
+      return "Pfizer";
+    case "MODERNA":
+      return "Moderna";
+    case "ASTRAZENECA":
+      return "AstraZeneca";
+    default:
+      return vaccineType;
+  }
+}
+
+function solve() {
+  $.post("http://192.168.1.13:8080/vaccinationSchedule/solve", function () {
+    refreshSolvingButtons(true);
+  }).fail(function (xhr, ajaxOptions, thrownError) {
+    showError("Start solving failed.", xhr);
+  });
+}
+
+function refreshSolvingButtons(solving) {
+  if (solving) {
+    $("#solveButton").hide();
+    $("#stopSolvingButton").show();
+    if (autoRefreshIntervalId == null) {
+      autoRefreshIntervalId = setInterval(refreshSolution, 2000);
+    }
+  } else {
+    $("#solveButton").show();
+    $("#stopSolvingButton").hide();
+    if (autoRefreshIntervalId != null) {
+      clearInterval(autoRefreshIntervalId);
+      autoRefreshIntervalId = null;
+    }
+  }
+}
+
+function stopSolving() {
+  try {
+    console.log("stopSolving() ");
+    $.ajax({
+      url: "http://192.168.1.13:8080/vaccinationSchedule/stopSolving", 
+      type: 'post',
+      success: function () {
+        refreshSolvingButtons(false);
+        refreshSolution();
+      },
+      error: function(xhr, ajaxOptions, error){
+        const serverErrorMessage = !xhr.responseJSON ? `${xhr.status}: ${xhr.statusText}` : xhr.responseJSON.message;
+        console.error("stopSolving() serverErrorMessage = "+serverErrorMessage);
+      }
+    });
+  }catch(e) {
+    console.error("stopSolving() exception = "+e);
+  }
+}
+
+function showError(title, xhr) {
+  const serverErrorMessage = !xhr.responseJSON ? `${xhr.status}: ${xhr.statusText}` : xhr.responseJSON.message;
+  console.error(title + "\n" + serverErrorMessage);
+  /*
+  const notification = $(`<div className="toast" role="alert" aria-live="assertive" aria-atomic="true" />`)
+    .append($(`<div className="toast-header bg-danger">
+                 <strong className="mr-auto text-dark">Error</strong>
+                 <button type="button" className="ml-2 mb-1 close" data-dismiss="toast" aria-label="Close">
+                   <span aria-hidden="true">&times;</span>
+                 </button>
+               </div>`))
+    .append($(`<div className="toast-body"/>`)
+      .append($(`<p/>`).text(title))
+      .append($(`<pre/>`)
+        .append($(`<code/>`).text(serverErrorMessage))
+      )
+    );
+  $("#notificationPanel").append(notification);
+  notification.toast({delay: 30000});
+  notification.toast("show");
+  */
+}
+
+$(document).ready(function () {
+  $.ajaxSetup({
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    }
+  });
+  $.each(["put", "delete"], function (i, method) {
+    $[method] = function (url, data, callback, type) {
+      if ($.isFunction(data)) {
+        type = type || callback;
+        callback = data;
+        data = undefined;
+      }
+      return $.ajax({
+        url: url,
+        type: method,
+        dataType: type,
+        data: data,
+        success: callback
+      });
+    };
+  });
+
+  $("#refreshButton").click(function () {
+    refreshSolution();
+  });
+  $("#solveButton").click(function () {
+    solve();
+  });
+  $("#stopSolvingButton").click(function () {
+    stopSolving();
+  });
+
+  const leafletMap = L.map("leafletMap", {doubleClickZoom: false})
+    .setView([33.75, -84.40], 10);
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors',
+  }).addTo(leafletMap);
+  $(`a[data-toggle="tab"]`).on("shown.bs.tab", function (e) {
+    leafletMap.invalidateSize();
+  })
+
+  vaccineCenterLeafletGroup = L.layerGroup();
+  vaccineCenterLeafletGroup.addTo(leafletMap);
+  personLeafletGroup = L.layerGroup();
+  personLeafletGroup.addTo(leafletMap);
+
+  refreshSolution();
+});
+
+// ****************************************************************************
+// TangoColorFactory
+// ****************************************************************************
+
+const SEQUENCE_1 = [0x8AE234, 0xFCE94F, 0x729FCF, 0xE9B96E, 0xAD7FA8];
+const SEQUENCE_2 = [0x73D216, 0xEDD400, 0x3465A4, 0xC17D11, 0x75507B];
+
+var colorMap = new Map;
+var nextColorCount = 0;
+
+function pickColor(object) {
+  let color = colorMap[object];
+  if (color !== undefined) {
+    return color;
+  }
+  color = nextColor();
+  colorMap[object] = color;
+  return color;
+}
+
+function nextColor() {
+  let color;
+  let colorIndex = nextColorCount % SEQUENCE_1.length;
+  let shadeIndex = Math.floor(nextColorCount / SEQUENCE_1.length);
+  if (shadeIndex === 0) {
+    color = SEQUENCE_1[colorIndex];
+  } else if (shadeIndex === 1) {
+    color = SEQUENCE_2[colorIndex];
+  } else {
+    shadeIndex -= 3;
+    let floorColor = SEQUENCE_2[colorIndex];
+    let ceilColor = SEQUENCE_1[colorIndex];
+    let base = Math.floor((shadeIndex / 2) + 1);
+    let divisor = 2;
+    while (base >= divisor) {
+      divisor *= 2;
+    }
+    base = (base * 2) - divisor + 1;
+    let shadePercentage = base / divisor;
+    color = buildPercentageColor(floorColor, ceilColor, shadePercentage);
+  }
+  nextColorCount++;
+  return "#" + color.toString(16);
+}
+
+function buildPercentageColor(floorColor, ceilColor, shadePercentage) {
+  let red = (floorColor & 0xFF0000) + Math.floor(shadePercentage * ((ceilColor & 0xFF0000) - (floorColor & 0xFF0000))) & 0xFF0000;
+  let green = (floorColor & 0x00FF00) + Math.floor(shadePercentage * ((ceilColor & 0x00FF00) - (floorColor & 0x00FF00))) & 0x00FF00;
+  let blue = (floorColor & 0x0000FF) + Math.floor(shadePercentage * ((ceilColor & 0x0000FF) - (floorColor & 0x0000FF))) & 0x0000FF;
+  return red | green | blue;
+}
 
 const VSchedule: React.FunctionComponent = () => (
-  <PageSection>
-    <Title headingLevel="h1" size="lg">Manage Vaccination Schedule</Title>
-  </PageSection>
+  <div className="container-fluid">
+    <nav className="navbar navbar-expand-lg navbar-light bg-light">
+        <a className="navbar-brand" href="https://www.optaplanner.org">
+            <img src={oplogo} alt="OptaPlanner logo" />
+        </a>
+    </nav>
+    <div className="sticky-top d-flex justify-content-center align-items-center" aria-live="polite" aria-atomic="true">
+        <div id="notificationPanel" ></div>
+    </div>
+    <h1>Vaccination scheduler</h1>
+    <p>Generate the optimal schedule to inject a country with COVID-19 vaccines.</p>
+    <div>
+        <button id="refreshButton" type="button" className="btn btn-secondary">
+            <span className="fas fa-refresh"></span> Refresh
+        </button>
+        <button id="solveButton" type="button" className="btn btn-success">
+            <span className="fas fa-play"></span> Solve
+        </button>
+        <button id="stopSolvingButton" type="button" className="btn btn-danger">
+            <span className="fas fa-stop"></span> Stop solving
+        </button>
+        <span id="score" className="score ml-2 align-middle font-weight-bold">Score: ?</span>
+        <div className="float-right">
+            <ul className="nav nav-pills" role="tablist">
+                <li className="nav-item">
+                    <a className="nav-link active" id="scheduleTab" data-toggle="tab" href="VSchedule#scheduleTabDiv" role="tab" aria-controls="schedulePanel" aria-selected="true">Schedule</a>
+                </li>
+                <li className="nav-item">
+                    <a className="nav-link" id="mapTab" data-toggle="tab" href="VSchedule#mapTabDiv" role="tab" aria-controls="mapPanel" aria-selected="false">Map</a>
+                </li>
+                <li className="nav-item">
+                    <a className="nav-link" id="unassignedTab" data-toggle="tab" href="VSchedule#unassignedTabDiv" role="tab" aria-controls="unassignedPanel" aria-selected="false">Unassigned</a>
+                </li>
+            </ul>
+        </div>
+    </div>
+    <div className="ml-5 mr-5">
+        <span>Vaccine types:</span>
+        <div id="vaccineTypes" className="card-columns"></div>
+    </div>
+    <div className="tab-content">
+        <div className="tab-pane fade show active" id="scheduleTabDiv" role="tabpanel" aria-labelledby="scheduleTab">
+            <table className="table table-borderless table-striped" id="scheduleTable">
+            </table>
+        </div>
+        <div className="tab-pane fade" id="mapTabDiv" role="tabpanel" aria-labelledby="mapTab">
+            <div id="leafletMap" ></div>
+        </div>
+        <div className="tab-pane fade" id="unassignedTabDiv" role="tabpanel" aria-labelledby="unassignedTab">
+            <h2>Unassigned persons</h2>
+            <div id="unassignedPersons" className="card-columns"></div>
+        </div>
+    </div>
+  </div>
 )
 
 export { VSchedule };
