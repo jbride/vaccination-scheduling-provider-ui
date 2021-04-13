@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { Route, RouteComponentProps, Switch } from 'react-router-dom';
 import { accessibleRouteChangeHandler } from '@app/utils/utils';
-import { Dashboard } from '@app/Dashboard/Dashboard';
-import { Support } from '@app/Support/Support';
-import { GeneralSettings } from '@app/Settings/General/GeneralSettings';
-import { ProfileSettings } from '@app/Settings/Profile/ProfileSettings';
+import { Overview } from '@app/Overview/Overview';
+import { VSchedule } from '@app/VSchedule/VSchedule';
+import { VCenters } from '@app/VCenters/VCenters';
+import { Appointments } from '@app/Appointments/Appointments';
 import { NotFound } from '@app/NotFound/NotFound';
 import { useDocumentTitle } from '@app/utils/useDocumentTitle';
 import { LastLocationProvider, useLastLocation } from 'react-router-last-location';
@@ -31,39 +31,36 @@ export type AppRouteConfig = IAppRoute | IAppRouteGroup;
 
 const routes: AppRouteConfig[] = [
   {
-    component: Dashboard,
+    component: Overview,
     exact: true,
-    label: 'Dashboard',
+    label: 'Overview',
     path: '/',
-    title: 'PatternFly Seed | Main Dashboard',
+    title: 'Overview',
   },
   {
-    component: Support,
+    component: VSchedule,
     exact: true,
     isAsync: true,
-    label: 'Support',
-    path: '/support',
-    title: 'PatternFly Seed | Support Page',
+    label: 'Manage Vaccination Schedule',
+    path: '/VSchedule',
+    title: 'Manage Vaccination Schedule',
   },
   {
-    label: 'Settings',
-    routes: [
-      {
-        component: GeneralSettings,
-        exact: true,
-        label: 'General',
-        path: '/settings/general',
-        title: 'PatternFly Seed | General Settings',
-      },
-      {
-        component: ProfileSettings,
-        exact: true,
-        label: 'Profile',
-        path: '/settings/profile',
-        title: 'PatternFly Seed | Profile Settings',
-      },
-    ],
+    component: Appointments,
+    exact: true,
+    isAsync: true,
+    label: 'Manage Appointments',
+    path: '/Appointments',
+    title: 'Manage Appointments',
   },
+  {
+    component: VCenters,
+    exact: true,
+    isAsync: true,
+    label: 'Manage Vaccination Centers',
+    path: '/VCenters',
+    title: 'Manage Vaccination Centers',
+  }
 ];
 
 // a custom hook for sending focus to the primary content container
