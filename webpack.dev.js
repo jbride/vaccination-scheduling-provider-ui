@@ -26,7 +26,8 @@ module.exports = merge(common('development'), {
         include: [
           ...stylePaths,
         path.resolve(__dirname, 'node_modules/bootstrap/dist/css/bootstrap.css'),
-        path.resolve(__dirname, 'node_modules/bootstrap/dist/css/bootstrap.min.css')
+        path.resolve(__dirname, 'node_modules/bootstrap/dist/css/bootstrap.min.css'),
+        path.resolve(__dirname, 'node_modules/leaflet/dist/leaflet.css')
         ],
         use: ["style-loader", "css-loader"]
       }

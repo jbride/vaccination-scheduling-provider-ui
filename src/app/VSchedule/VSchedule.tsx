@@ -5,10 +5,18 @@ import L from 'leaflet';
 import moment from 'moment';
 import oplogo from '@app/bgimages/optaPlannerLogo200px.png';
 import 'bootstrap/dist/css/bootstrap.min.css';
+import 'leaflet/dist/leaflet.css'
+
+var vSchedulerHost = process.env.VACCINATION_SCHEDULER_HOST;
+if(typeof vSchedulerHost === 'undefined') {
+  vSchedulerHost = "v-scheduler";
+}
+console.log("VACCINATION_SCHEDULER_HOST = "+vSchedulerHost);
 
 var autoRefreshIntervalId = null;
 var vaccineCenterLeafletGroup = null;
 var personLeafletGroup = null;
+var lineIndex = 0;
 
 const timeslotStyle = {
   float: 'right'
@@ -19,7 +27,7 @@ const cardStyle = (color) => {
 }
 
 function refreshSolution() {
-  $.getJSON("localhost:8080/vaccinationSchedule", function (solution) {
+  $.getJSON("http://"+vSchedulerHost+":8080/vaccinationSchedule", function (solution) {
     refreshSolvingButtons(solution.solverStatus != null && solution.solverStatus !== "NOT_SOLVING");
     $("#score").text("Score: " + (solution.score == null ? "?" : solution.score));
 
@@ -27,9 +35,9 @@ function refreshSolution() {
     vaccineTypesDiv.children().remove();
     solution.vaccineTypeList.forEach((vaccineType) => {
       const color = pickColor(vaccineType);
-      vaccineTypesDiv.append($(`<div className="card" />`)
-          .append($(`<div className="card-body p-2"/>`)
-            .append($(`<h5 className="card-title mb-0"/>`).text(vaccineTypeToString(vaccineType)))));
+      vaccineTypesDiv.append($(`<div class="card style="background-color: ${color}" />`)
+          .append($(`<div class="card-body p-2"/>`)
+            .append($(`<h5 class="card-title mb-0"/>`).text(vaccineTypeToString(vaccineType)))));
     });
 
     const scheduleTable = $("#scheduleTable");
@@ -64,40 +72,40 @@ function refreshSolution() {
       var parsedDateTime = moment(dateTime, "YYYY,M,D,H,m");
       var showDate = (previousParsedDateTime == null || !parsedDateTime.isSame(previousParsedDateTime, "day"));
       row
-        .append($(`<th className="align-middle"/>`)
+        .append($(`<th class="align-middle"/>`)
           .append($(`<span style={timeslotStyle} />`).text(showDate ? parsedDateTime.format("ddd MMM D HH:mm") : parsedDateTime.format("HH:mm"))));
       previousParsedDateTime = parsedDateTime;
       solution.vaccinationCenterList.forEach((vaccinationCenter) => {
         for (lineIndex = 0; lineIndex < vaccinationCenter.lineCount; lineIndex++) {
           var injection = injectionMap.get(dateTime + "/" + vaccinationCenter.name + "/" + lineIndex);
           if (injection == null) {
-            row.append($(`<td className="p-1"/>`));
+            row.append($(`<td class="p-1"/>`));
           } else {
             const color = pickColor(injection.vaccineType);
-            var cardBody = $(`<div className="card-body pt-1 pb-1 pl-2 pr-2"/>`);
+            var cardBody = $(`<div class="card-body pt-1 pb-1 pl-2 pr-2"/>`);
             if (injection.person == null) {
-              cardBody.append($(`<h5 className="card-title mb-0"/>`).text("Unassigned"));
+              cardBody.append($(`<h5 class="card-title mb-0"/>`).text("Unassigned"));
             } else {
-              cardBody.append($(`<h5 className="card-title mb-1"/>`)
+              cardBody.append($(`<h5 class="card-title mb-1"/>`)
                 .text(injection.person.name + " (" + injection.person.age + ")"));
               if (injection.person.age >= 55 && injection.vaccineType === "ASTRAZENECA") {
-                cardBody.append($(`<p className="badge badge-danger mb-0"/>`).text("55+ has " + vaccineTypeToString(injection.vaccineType)));
+                cardBody.append($(`<p class="badge badge-danger mb-0"/>`).text("55+ has " + vaccineTypeToString(injection.vaccineType)));
               }
               if (!injection.person.firstShotInjected) {
-                cardBody.append($(`<p className="card-text ml-2 mb-0"/>`).text("1th shot"));
+                cardBody.append($(`<p class="card-text ml-2 mb-0"/>`).text("1th shot"));
               } else {
                 var idealDateDiff = moment(injection.dateTime, "YYYY,M,D,H,m").diff(moment(injection.person.secondShotIdealDate, "YYYY,M,D"), 'days');
-                cardBody.append($(`<p className="card-text ml-2 mb-0"/>`).text("2nd shot ("
+                cardBody.append($(`<p class="card-text ml-2 mb-0"/>`).text("2nd shot ("
                   + (idealDateDiff === 0 ? "ideal day"
                     : (idealDateDiff < 0 ? (-idealDateDiff) + " days too early"
                       : idealDateDiff + " days too late")) + ")"));
                 if (injection.vaccineType !== injection.person.firstShotVaccineType) {
-                  cardBody.append($(`<p className="badge badge-danger ml-2 mb-0"/>`).text("First shot was " + vaccineTypeToString(injection.person.firstShotVaccineType)));
+                  cardBody.append($(`<p class="badge badge-danger ml-2 mb-0"/>`).text("First shot was " + vaccineTypeToString(injection.person.firstShotVaccineType)));
                 }
               }
             }
-            row.append($(`<td className="p-1"/>`)
-              .append($(`<div className="card" style={cardStyle(color)}/>`)
+            row.append($(`<td class="p-1"/>`)
+              .append($(`<div class="card" style="background-color: ${color}" />`)
                 .append(cardBody)));
           }
         }
@@ -118,10 +126,10 @@ function refreshSolution() {
       if (injection != null) {
         L.polyline([person.homeLocation, injection.vaccinationCenter.location], {color: personColor, weight: 1}).addTo(personLeafletGroup);
       } else {
-        unassignedPeronsDiv.append($(`<div className="card"/>`)
-            .append($(`<div className="card-body pt-1 pb-1 pl-2 pr-2"/>`)
-              .append($(`<h5 className="card-title mb-1"/>`).text(person.name + " (" + person.age + ")"))
-              .append($(`<p className="card-text ml-2"/>`).text(
+        unassignedPeronsDiv.append($(`<div class="card"/>`)
+            .append($(`<div class="card-body pt-1 pb-1 pl-2 pr-2"/>`)
+              .append($(`<h5 class="card-title mb-1"/>`).text(person.name + " (" + person.age + ")"))
+              .append($(`<p class="card-text ml-2"/>`).text(
                 person.firstShotInjected
                 ? "2nd shot (ideally " + moment(person.secondShotIdealDate, "YYYY,M,D").format("ddd MMM D") + ")"
                 : "1th shot"))));
@@ -144,7 +152,7 @@ function vaccineTypeToString(vaccineType) {
 }
 
 function solve() {
-  $.post("http://192.168.1.13:8080/vaccinationSchedule/solve", function () {
+  $.post("http://"+vSchedulerHost+":8080/vaccinationSchedule/solve", function () {
     refreshSolvingButtons(true);
   }).fail(function (xhr, ajaxOptions, thrownError) {
     showError("Start solving failed.", xhr);
@@ -172,7 +180,7 @@ function stopSolving() {
   try {
     console.log("stopSolving() ");
     $.ajax({
-      url: "http://192.168.1.13:8080/vaccinationSchedule/stopSolving", 
+      url: "http://"+vSchedulerHost+":8080/vaccinationSchedule/stopSolving", 
       type: 'post',
       success: function () {
         refreshSolvingButtons(false);
@@ -191,24 +199,6 @@ function stopSolving() {
 function showError(title, xhr) {
   const serverErrorMessage = !xhr.responseJSON ? `${xhr.status}: ${xhr.statusText}` : xhr.responseJSON.message;
   console.error(title + "\n" + serverErrorMessage);
-  /*
-  const notification = $(`<div className="toast" role="alert" aria-live="assertive" aria-atomic="true" />`)
-    .append($(`<div className="toast-header bg-danger">
-                 <strong className="mr-auto text-dark">Error</strong>
-                 <button type="button" className="ml-2 mb-1 close" data-dismiss="toast" aria-label="Close">
-                   <span aria-hidden="true">&times;</span>
-                 </button>
-               </div>`))
-    .append($(`<div className="toast-body"/>`)
-      .append($(`<p/>`).text(title))
-      .append($(`<pre/>`)
-        .append($(`<code/>`).text(serverErrorMessage))
-      )
-    );
-  $("#notificationPanel").append(notification);
-  notification.toast({delay: 30000});
-  notification.toast("show");
-  */
 }
 
 $(document).ready(function () {
@@ -342,13 +332,13 @@ const VSchedule: React.FunctionComponent = () => (
         <div className="float-right">
             <ul className="nav nav-pills" role="tablist">
                 <li className="nav-item">
-                    <a className="nav-link active" id="scheduleTab" data-toggle="tab" href="VSchedule#scheduleTabDiv" role="tab" aria-controls="schedulePanel" aria-selected="true">Schedule</a>
+                    <a className="nav-link active" id="scheduleTab" data-toggle="tab" href="VSchedule/#scheduleTabDiv" role="tab" aria-controls="schedulePanel" aria-selected="true">Schedule</a>
                 </li>
                 <li className="nav-item">
-                    <a className="nav-link" id="mapTab" data-toggle="tab" href="VSchedule#mapTabDiv" role="tab" aria-controls="mapPanel" aria-selected="false">Map</a>
+                    <a className="nav-link" id="mapTab" data-toggle="tab" href="VSchedule/#mapTabDiv" role="tab" aria-controls="mapPanel" aria-selected="false">Map</a>
                 </li>
                 <li className="nav-item">
-                    <a className="nav-link" id="unassignedTab" data-toggle="tab" href="VSchedule#unassignedTabDiv" role="tab" aria-controls="unassignedPanel" aria-selected="false">Unassigned</a>
+                    <a className="nav-link" id="unassignedTab" data-toggle="tab" href="VSchedule/#unassignedTabDiv" role="tab" aria-controls="unassignedPanel" aria-selected="false">Unassigned</a>
                 </li>
             </ul>
         </div>
