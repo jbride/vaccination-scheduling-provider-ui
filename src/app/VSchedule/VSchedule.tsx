@@ -1,11 +1,12 @@
-import * as React from 'react';
+import React, {useState, useEffect, useReducer} from 'react';
 import { PageSection, Title } from '@patternfly/react-core';
 import $ from 'jquery';
 import L from 'leaflet';
 import moment from 'moment';
 import oplogo from '@app/bgimages/optaPlannerLogo200px.png';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import 'leaflet/dist/leaflet.css'
+import 'leaflet/dist/leaflet.css';
+import { Tabs, Tab, TabTitleText, Checkbox } from '@patternfly/react-core';
 
 var vSchedulerHost = process.env.VACCINATION_SCHEDULER_HOST;
 if(typeof vSchedulerHost === 'undefined') {
@@ -27,6 +28,7 @@ const cardStyle = (color) => {
 }
 
 function refreshSolution() {
+  console.log("refreshSolution ... ");
   $.getJSON("http://"+vSchedulerHost+":8080/vaccinationSchedule", function (solution) {
     refreshSolvingButtons(solution.solverStatus != null && solution.solverStatus !== "NOT_SOLVING");
     $("#score").text("Score: " + (solution.score == null ? "?" : solution.score));
@@ -42,8 +44,8 @@ function refreshSolution() {
 
     const scheduleTable = $("#scheduleTable");
     scheduleTable.children().remove();
-    const unassignedPeronsDiv = $("#unassignedPersons");
-    unassignedPeronsDiv.children().remove();
+    const unassignedPersonsDiv = $("#unassignedPersons");
+    unassignedPersonsDiv.children().remove();
 
     const thead = $("<thead>").appendTo(scheduleTable);
     const headerRow = $("<tr>").appendTo(thead);
@@ -126,7 +128,7 @@ function refreshSolution() {
       if (injection != null) {
         L.polyline([person.homeLocation, injection.vaccinationCenter.location], {color: personColor, weight: 1}).addTo(personLeafletGroup);
       } else {
-        unassignedPeronsDiv.append($(`<div class="card"/>`)
+        unassignedPersonsDiv.append($(`<div class="card"/>`)
             .append($(`<div class="card-body pt-1 pb-1 pl-2 pr-2"/>`)
               .append($(`<h5 class="card-title mb-1"/>`).text(person.name + " (" + person.age + ")"))
               .append($(`<p class="card-text ml-2"/>`).text(
@@ -202,6 +204,7 @@ function showError(title, xhr) {
 }
 
 $(document).ready(function () {
+  console.log("document.ready() ..... ");
   $.ajaxSetup({
     headers: {
       "Content-Type": "application/json",
@@ -235,8 +238,7 @@ $(document).ready(function () {
     stopSolving();
   });
 
-  const leafletMap = L.map("leafletMap", {doubleClickZoom: false})
-    .setView([33.75, -84.40], 10);
+  const leafletMap = L.map("leafletMap", { doubleClickZoom: false }).setView([33.75, -84.40], 10);
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
@@ -306,61 +308,60 @@ function buildPercentageColor(floorColor, ceilColor, shadePercentage) {
   return red | green | blue;
 }
 
-const VSchedule: React.FunctionComponent = () => (
-  <div className="container-fluid">
-    <nav className="navbar navbar-expand-lg navbar-light bg-light">
+const VSchedule: React.FunctionComponent = () => {
+
+  const [activeTabKey, setActiveTabKey] = useState(0);
+
+  const handleTabClick = (event, tabIndex) => {
+    setActiveTabKey(tabIndex);
+  }
+
+  return (
+
+    <div className="container-fluid">
+      <nav className="navbar navbar-expand-lg navbar-light bg-light">
         <a className="navbar-brand" href="https://www.optaplanner.org">
-            <img src={oplogo} alt="OptaPlanner logo" />
+          <img src={oplogo} alt="OptaPlanner logo" />
         </a>
-    </nav>
-    <div className="sticky-top d-flex justify-content-center align-items-center" aria-live="polite" aria-atomic="true">
+      </nav>
+      <div className="sticky-top d-flex justify-content-center align-items-center" aria-live="polite" aria-atomic="true">
         <div id="notificationPanel" ></div>
-    </div>
-    <h1>Vaccination scheduler</h1>
-    <p>Generate the optimal schedule to inject a country with COVID-19 vaccines.</p>
-    <div>
+      </div>
+      <h1>Vaccination scheduler</h1>
+      <p>Generate the optimal schedule to inject a country with COVID-19 vaccines.</p>
+      <div>
         <button id="refreshButton" type="button" className="btn btn-secondary">
-            <span className="fas fa-refresh"></span> Refresh
+          <span className="fas fa-refresh"></span> Refresh
         </button>
         <button id="solveButton" type="button" className="btn btn-success">
-            <span className="fas fa-play"></span> Solve
+          <span className="fas fa-play"></span> Solve
         </button>
         <button id="stopSolvingButton" type="button" className="btn btn-danger">
-            <span className="fas fa-stop"></span> Stop solving
+          <span className="fas fa-stop"></span> Stop solving
         </button>
         <span id="score" className="score ml-2 align-middle font-weight-bold">Score: ?</span>
-        <div className="float-right">
-            <ul className="nav nav-pills" role="tablist">
-                <li className="nav-item">
-                    <a className="nav-link active" id="scheduleTab" data-toggle="tab" href="VSchedule/#scheduleTabDiv" role="tab" aria-controls="schedulePanel" aria-selected="true">Schedule</a>
-                </li>
-                <li className="nav-item">
-                    <a className="nav-link" id="mapTab" data-toggle="tab" href="VSchedule/#mapTabDiv" role="tab" aria-controls="mapPanel" aria-selected="false">Map</a>
-                </li>
-                <li className="nav-item">
-                    <a className="nav-link" id="unassignedTab" data-toggle="tab" href="VSchedule/#unassignedTabDiv" role="tab" aria-controls="unassignedPanel" aria-selected="false">Unassigned</a>
-                </li>
-            </ul>
+        <div>
+          <div className="ml-5 mr-5">
+            <span>Vaccine types:</span>
+            <div id="vaccineTypes" className="card-columns"></div>
+          </div>
+          <Tabs activeKey={activeTabKey} onSelect={handleTabClick} isBox={true}>
+            <Tab eventKey={0} title={<TabTitleText>Schedule</TabTitleText>}>
+                <table className="table table-borderless table-striped" id="scheduleTable">
+                </table>
+            </Tab>
+            <Tab eventKey={1} title={<TabTitleText>Map</TabTitleText>}>
+                <div id="leafletMap" ></div>
+            </Tab>
+            <Tab eventKey={2} title={<TabTitleText>Unassigned</TabTitleText>}>
+                <h2>Unassigned persons</h2>
+                <div id="unassignedPersons" className="card-columns"></div>
+            </Tab>
+          </Tabs>
         </div>
+      </div>
     </div>
-    <div className="ml-5 mr-5">
-        <span>Vaccine types:</span>
-        <div id="vaccineTypes" className="card-columns"></div>
-    </div>
-    <div className="tab-content">
-        <div className="tab-pane fade show active" id="scheduleTabDiv" role="tabpanel" aria-labelledby="scheduleTab">
-            <table className="table table-borderless table-striped" id="scheduleTable">
-            </table>
-        </div>
-        <div className="tab-pane fade" id="mapTabDiv" role="tabpanel" aria-labelledby="mapTab">
-            <div id="leafletMap" ></div>
-        </div>
-        <div className="tab-pane fade" id="unassignedTabDiv" role="tabpanel" aria-labelledby="unassignedTab">
-            <h2>Unassigned persons</h2>
-            <div id="unassignedPersons" className="card-columns"></div>
-        </div>
-    </div>
-  </div>
-)
+  );
+}
 
 export { VSchedule };
